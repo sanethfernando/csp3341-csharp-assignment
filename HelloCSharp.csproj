@@ -7,4 +7,11 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <!-- Keep the Hello World project from picking up files in the WinForms project folder -->
+  <ItemGroup>
+    <Compile Remove="FileEncryptionDashboard\**" />
+    <EmbeddedResource Remove="FileEncryptionDashboard\**" />
+    <None Remove="FileEncryptionDashboard\**" />
+  </ItemGroup>
+
 </Project>
