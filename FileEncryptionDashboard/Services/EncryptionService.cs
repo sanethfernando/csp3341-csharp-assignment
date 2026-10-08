@@ -196,4 +196,128 @@ public sealed class EncryptionService
             CryptographicOperations.ZeroMemory(fileKey);
         }
     }
+
+    // ---------- asynchronous file operations (used by the GUI) ----------
+    // File reads and writes use async I/O; the CPU-heavy encryption runs on a
+    // background thread with Task.Run. Both honour the CancellationToken, and
+    // progress messages are reported through IProgress so the window stays responsive.
+    // The result is first written to a ".tmp" file and then moved into place, so a
+    // cancelled or failed operation never leaves a half-written output file.
+
+    /// <summary>Encrypts a file without blocking the caller.</summary>
+    public async Task<EncryptionResult> EncryptFileAsync(
+        string inputPath,
+        byte[] masterKey,
+        string? outputPath = null,
+        IProgress<string>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        var info = new FileInfo(inputPath);
+        if (!info.Exists)
+        {
+            throw new FileNotFoundException("The file to encrypt was not found.", inputPath);
+        }
+        if (info.Length > MaxFileSizeBytes)
+        {
+            throw new InvalidOperationException(
+                $"File is larger than the {MaxFileSizeBytes / (1024 * 1024)} MB limit.");
+        }
+
+        outputPath ??= inputPath + ".enc";
+        EnsureDifferentPaths(inputPath, outputPath);
+        string tempPath = outputPath + ".tmp";
+
+        progress?.Report("Reading file...");
+        byte[] plaintext = await File.ReadAllBytesAsync(inputPath, cancellationToken);
+        byte[] fileKey = RandomNumberGenerator.GetBytes(KeySize);
+        Guid fileId = Guid.NewGuid();
+
+        try
+        {
+            progress?.Report("Encrypting...");
+            byte[] container = await Task.Run(() => EncryptBytes(plaintext, fileKey, fileId), cancellationToken);
+
+            progress?.Report("Saving encrypted file...");
+            await File.WriteAllBytesAsync(tempPath, container, cancellationToken);
+            File.Move(tempPath, outputPath, overwrite: true);
+
+            return new EncryptionResult(fileId, WrapKey(fileKey, masterKey), Fingerprint(fileKey));
+        }
+        finally
+        {
+            // Wipe secrets from memory and remove any leftover temporary file.
+            CryptographicOperations.ZeroMemory(fileKey);
+            CryptographicOperations.ZeroMemory(plaintext);
+            DeleteQuietly(tempPath);
+        }
+    }
+
+    /// <summary>Decrypts a file without blocking the caller.</summary>
+    public async Task DecryptFileAsync(
+        string inputPath,
+        string outputPath,
+        WrappedKey wrapped,
+        byte[] masterKey,
+        IProgress<string>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureDifferentPaths(inputPath, outputPath);
+        if (new FileInfo(inputPath).Length > MaxFileSizeBytes + 1024)
+        {
+            throw new InvalidOperationException(
+                $"File is larger than the {MaxFileSizeBytes / (1024 * 1024)} MB limit.");
+        }
+
+        string tempPath = outputPath + ".tmp";
+
+        progress?.Report("Reading encrypted file...");
+        byte[] container = await File.ReadAllBytesAsync(inputPath, cancellationToken);
+
+        progress?.Report("Unlocking the file key...");
+        byte[] fileKey = UnwrapKey(wrapped, masterKey);
+        byte[]? plaintext = null;
+
+        try
+        {
+            progress?.Report("Decrypting...");
+            plaintext = await Task.Run(() => DecryptBytes(container, fileKey), cancellationToken);
+
+            progress?.Report("Saving decrypted file...");
+            await File.WriteAllBytesAsync(tempPath, plaintext, cancellationToken);
+            File.Move(tempPath, outputPath, overwrite: true);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(fileKey);
+            if (plaintext is not null)
+            {
+                CryptographicOperations.ZeroMemory(plaintext);
+            }
+            DeleteQuietly(tempPath);
+        }
+    }
+
+    /// <summary>Stops the output file from being the same file as the input (which would destroy it).</summary>
+    private static void EnsureDifferentPaths(string inputPath, string outputPath)
+    {
+        if (string.Equals(Path.GetFullPath(inputPath), Path.GetFullPath(outputPath), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("The output file must be different from the input file.", nameof(outputPath));
+        }
+    }
+
+    private static void DeleteQuietly(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (IOException)
+        {
+            // Nothing more can be done; the temporary file is harmless.
+        }
+    }
 }

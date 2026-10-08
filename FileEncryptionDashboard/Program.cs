@@ -21,8 +21,11 @@ internal static class Program
         string connectionString = Database.BuildConnectionString(Database.DefaultPath);
         Database.Initialize(connectionString);
 
-        // Service layer.
-        var auth = new AuthService(new UserRepository(connectionString));
+        // The same repository and service objects are shared by every window.
+        var userRepository = new UserRepository(connectionString);
+        var keyRepository = new KeyRepository(connectionString);
+        var auth = new AuthService(userRepository);
+        var encryption = new EncryptionService();
 
         while (true)
         {
@@ -34,7 +37,7 @@ internal static class Program
 
             // The session (and its master key) is wiped when this block ends.
             using UserSession session = loginForm.Session;
-            using var mainForm = new MainForm(session);
+            using var mainForm = new MainForm(session, encryption, keyRepository);
             if (mainForm.ShowDialog() != DialogResult.Retry)
             {
                 break; // window closed with the X button: exit the application
