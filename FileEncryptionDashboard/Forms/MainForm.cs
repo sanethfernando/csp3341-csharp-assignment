@@ -23,10 +23,12 @@ public sealed class MainForm : Form
     private readonly Button _decryptButton = new();
     private readonly Button _logoutButton = new();
     private readonly Button _cancelButton = new();
+    private readonly Button _logButton = new();
     private readonly ProgressBar _progressBar = new();
     private readonly Label _statusLabel = new();
 
     private CancellationTokenSource? _cts;
+    private LogForm? _logForm;
     private bool _busy;
 
     public MainForm(UserSession session, EncryptionService encryption, IKeyRepository keys)
@@ -62,6 +64,13 @@ public sealed class MainForm : Form
         _logoutButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
         _logoutButton.Click += (sender, e) => DialogResult = DialogResult.Retry; // closes the form
 
+        _logButton.Text = "View log";
+        _logButton.Size = new Size(100, 30);
+        _logButton.Location = new Point(408, 16);
+        _logButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        _logButton.Visible = _session.IsAdmin; // only Admins get this button
+        _logButton.Click += LogButton_Click;
+
         _encryptBrowseButton.Click += (sender, e) => Browse(_encryptPathBox, "Choose a file to encrypt", null);
         _encryptButton.Click += EncryptButton_Click;
         _decryptBrowseButton.Click += (sender, e) =>
@@ -85,6 +94,7 @@ public sealed class MainForm : Form
 
         Controls.Add(header);
         Controls.Add(_logoutButton);
+        Controls.Add(_logButton);
         Controls.Add(BuildFileGroup("Encrypt a file", 64, _encryptPathBox, _encryptBrowseButton, _encryptButton,
             "Encrypt", "The encrypted copy is saved next to the original with .enc added to its name."));
         Controls.Add(BuildFileGroup("Decrypt a file", 180, _decryptPathBox, _decryptBrowseButton, _decryptButton,
@@ -296,6 +306,24 @@ public sealed class MainForm : Form
             await _encryption.DecryptFileAsync(input, output, wrapped, _session.MasterKey, progress, token);
             return $"Decrypted: {output}";
         });
+    }
+
+    private void LogButton_Click(object? sender, EventArgs e)
+    {
+        // The button is hidden for General Users, but the role is checked here as well.
+        if (!_session.IsAdmin)
+        {
+            return;
+        }
+
+        if (_logForm is { IsDisposed: false })
+        {
+            _logForm.Activate(); // already open: just bring it to the front
+            return;
+        }
+
+        _logForm = new LogForm(_keys);
+        _logForm.Show(this); // not modal, so files can be encrypted while the log stays open
     }
 
     /// <summary>

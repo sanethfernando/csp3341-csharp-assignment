@@ -17,7 +17,23 @@ public sealed class KeyRepository : IKeyRepository
     public KeyRepository(string connectionString) => _connectionString = connectionString;
 
     /// <inheritdoc />
+    public event EventHandler<LogEntryAddedEventArgs>? EntryAdded;
+
+    /// <inheritdoc />
     public long Add(EncryptionResult result, string fileName, string owner)
+    {
+        DateTime encryptedAt = DateTime.UtcNow;
+        long id = InsertRow(result, fileName, owner, encryptedAt);
+
+        // Tell anyone who is listening (for example the log window). This happens
+        // after the database connection is closed, so a slow listener cannot hold it open.
+        EntryAdded?.Invoke(this, new LogEntryAddedEventArgs(
+            new EncryptedFileRecord(id, fileName, owner, encryptedAt, result.KeyFingerprint)));
+
+        return id;
+    }
+
+    private long InsertRow(EncryptionResult result, string fileName, string owner, DateTime encryptedAt)
     {
         using var connection = new SqliteConnection(_connectionString);
         connection.Open();
@@ -35,7 +51,7 @@ public sealed class KeyRepository : IKeyRepository
         command.Parameters.AddWithValue("$fileId", result.FileId.ToString());
         command.Parameters.AddWithValue("$fileName", fileName);
         command.Parameters.AddWithValue("$owner", owner);
-        command.Parameters.AddWithValue("$encryptedAt", DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$encryptedAt", encryptedAt.ToString("O", CultureInfo.InvariantCulture));
         command.Parameters.AddWithValue("$fingerprint", result.KeyFingerprint);
         command.Parameters.AddWithValue("$nonce", result.Wrapped.Nonce);
         command.Parameters.AddWithValue("$tag", result.Wrapped.Tag);

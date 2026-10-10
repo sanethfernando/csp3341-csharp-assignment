@@ -101,6 +101,35 @@ public class RepositoryTests : IDisposable
         Assert.Equal(DateTimeKind.Utc, log[0].EncryptedAtUtc.Kind);
     }
 
+    [Fact]
+    public void KeyRepository_Add_RaisesEntryAddedWithTheNewEntry()
+    {
+        LogEntryAddedEventArgs? received = null;
+        _keys.EntryAdded += (sender, e) => received = e;
+        EncryptionResult result = NewEncryptionResult();
+
+        long id = _keys.Add(result, "report.docx", "alice");
+
+        LogEntryAddedEventArgs args = Assert.IsType<LogEntryAddedEventArgs>(received);
+        Assert.Equal(id, args.Entry.Id);
+        Assert.Equal("report.docx", args.Entry.FileName);
+        Assert.Equal("alice", args.Entry.Owner);
+        Assert.Equal(result.KeyFingerprint, args.Entry.KeyFingerprint);
+    }
+
+    [Fact]
+    public void KeyRepository_Add_DoesNotNotifyAHandlerThatUnsubscribed()
+    {
+        int calls = 0;
+        EventHandler<LogEntryAddedEventArgs> handler = (sender, e) => calls++;
+        _keys.EntryAdded += handler;
+        _keys.EntryAdded -= handler;
+
+        _keys.Add(NewEncryptionResult(), "report.docx", "alice");
+
+        Assert.Equal(0, calls);
+    }
+
     // ---------- UserRepository ----------
 
     [Fact]

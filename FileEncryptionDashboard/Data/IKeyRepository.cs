@@ -10,6 +10,9 @@ namespace FileEncryptionDashboard.Data;
 /// </summary>
 public interface IKeyRepository
 {
+    /// <summary>Raised after a new encryption record has been saved. Can be raised on a background thread.</summary>
+    event EventHandler<LogEntryAddedEventArgs>? EntryAdded;
+
     /// <summary>Saves a new encryption record and returns its database id.</summary>
     long Add(EncryptionResult result, string fileName, string owner);
 
